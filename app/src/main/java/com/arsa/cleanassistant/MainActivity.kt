@@ -95,7 +95,7 @@ fun AssistantApp() {
         .replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
         .replace("ة", "ه").replace("ى", "ي")
         .replace(Regex("[^\p{L}\p{N}\s]"), " ")
-        .replace(Regex("\s+"), " ")
+        .replace(Regex("\\s+"), " ")
         .trim()
 
     fun findInstalledAppIntent(queryRaw: String): Pair<Intent, String>? {
