@@ -88,6 +88,95 @@ fun AssistantApp() {
             TrainedRule("الوقت", "TIME", "clock")
         )
     }
+
+    fun normalizeArabic(text: String): String = text
+        .lowercase()
+        .replace(Regex("[\u064B-\u065F\u0670]"), "")
+        .replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
+        .replace("ة", "ه").replace("ى", "ي")
+        .replace(Regex("[^\p{L}\p{N}\s]"), " ")
+        .replace(Regex("\s+"), " ")
+        .trim()
+
+    fun findInstalledAppIntent(queryRaw: String): Pair<Intent, String>? {
+        val normQuery = normalizeArabic(queryRaw)
+        val cleaned = normQuery
+            .removePrefix("افتح ")
+            .removePrefix("فتح ")
+            .removePrefix("شغل ")
+            .removePrefix("شعل ")
+            .removePrefix("open ")
+            .removePrefix("launch ")
+            .trim()
+        if (cleaned.isEmpty()) return null
+
+        val aliases = mapOf(
+            "واتساب" to "com.whatsapp",
+            "whatsapp" to "com.whatsapp",
+            "يوتيوب" to "com.google.android.youtube",
+            "youtube" to "com.google.android.youtube",
+            "كروم" to "com.android.chrome",
+            "chrome" to "com.android.chrome",
+            "الكاميرا" to "com.android.camera",
+            "كاميرا" to "com.android.camera",
+            "camera" to "com.android.camera",
+            "الرسائل" to "com.google.android.apps.messaging",
+            "رسائل" to "com.google.android.apps.messaging",
+            "الهاتف" to "com.android.dialer",
+            "هاتف" to "com.android.dialer",
+            "تليجرام" to "org.telegram.messenger",
+            "تيليجرام" to "org.telegram.messenger",
+            "telegram" to "org.telegram.messenger",
+            "انستغرام" to "com.instagram.android",
+            "انستجرام" to "com.instagram.android",
+            "instagram" to "com.instagram.android",
+            "تيك توك" to "com.zhiliaoapp.musically",
+            "تيكتوك" to "com.zhiliaoapp.musically",
+            "tiktok" to "com.zhiliaoapp.musically",
+            "فيسبوك" to "com.facebook.katana",
+            "facebook" to "com.facebook.katana"
+        )
+
+        aliases[cleaned]?.let { pkg ->
+            context.packageManager.getLaunchIntentForPackage(pkg)?.let { intent ->
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                return intent to pkg
+            }
+        }
+
+        val mainIntent = Intent(Intent.ACTION_MAIN, null).apply {
+            addCategory(Intent.CATEGORY_LAUNCHER)
+        }
+        val resolveInfos = context.packageManager.queryIntentActivities(mainIntent, 0)
+        val matched = resolveInfos.firstOrNull { info ->
+            val label = normalizeArabic(info.loadLabel(context.packageManager).toString())
+            val pkg = info.activityInfo.packageName.lowercase()
+            label == cleaned || label.contains(cleaned) || cleaned.contains(label) || pkg.contains(cleaned)
+        }
+        if (matched != null) {
+            val pkg = matched.activityInfo.packageName
+            context.packageManager.getLaunchIntentForPackage(pkg)?.let { intent ->
+                intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                val appLabel = matched.loadLabel(context.packageManager).toString()
+                return intent to "$appLabel ($pkg)"
+            }
+        }
+        return null
+    }
+
+    fun matchSystemSettingAction(normText: String): Pair<String, String>? = when {
+        normText.contains("واي فاي") || normText.contains("الواي فاي") || normText.contains("wifi") || normText.contains("wi fi") ->
+            Settings.ACTION_WIFI_SETTINGS to "إعدادات الواي فاي"
+        normText.contains("بلوتوث") || normText.contains("bluetooth") ->
+            Settings.ACTION_BLUETOOTH_SETTINGS to "إعدادات البلوتوث"
+        normText.contains("بطاريه") || normText.contains("battery") ->
+            Settings.ACTION_BATTERY_SAVER_SETTINGS to "إعدادات البطارية"
+        normText.contains("اللغه") || normText.contains("language") ->
+            Settings.ACTION_LOCALE_SETTINGS to "إعدادات اللغة"
+        normText.contains("اعدادات") || normText.contains("settings") || normText.contains("الضبط") ->
+            Settings.ACTION_SETTINGS to "الإعدادات"
+        else -> null
+    }
     val logs = remember { mutableStateListOf<String>() }
 
     fun addLog(entry: String) {
@@ -101,42 +190,74 @@ fun AssistantApp() {
             replyText = "اكتب أمراً أو استخدم الميكروفون."
             return
         }
+        val normClean = normalizeArabic(clean)
+
         val match = rules.firstOrNull { rule ->
-            clean.contains(rule.phrase, ignoreCase = true) || rule.phrase.contains(clean, ignoreCase = true)
+            val normPhrase = normalizeArabic(rule.phrase)
+            normClean.contains(normPhrase) || normPhrase.contains(normClean)
         }
-        if (match == null) {
-            replyText = "لم أتعرف على الأمر: «$clean». يمكنك إضافته من صفحة الإصلاحات والتعليم."
-            addLog("أمر غير معروف: $clean")
+        if (match != null) {
+            when (match.type) {
+                "APP" -> {
+                    val found = findInstalledAppIntent(match.target)
+                    if (found != null) {
+                        context.startActivity(found.first)
+                        replyText = "تم تنفيذ الأمر: فتح ${found.second}"
+                    } else {
+                        replyText = "التطبيق غير مثبت أو لا يملك واجهة تشغيل: ${match.target}"
+                        addLog("تعذر العثور على حزمة التطبيق: ${match.target}")
+                    }
+                }
+                "SETTING" -> {
+                    try {
+                        val intent = Intent(match.target).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                        context.startActivity(intent)
+                        replyText = "تم تنفيذ الأمر: فتح إعدادات النظام."
+                    } catch (_: Exception) {
+                        replyText = "تعذر فتح شاشة الإعدادات المطلوبة."
+                        addLog("فشل فتح الإعداد: ${match.target}")
+                    }
+                }
+                "TIME" -> {
+                    val sdf = SimpleDateFormat("hh:mm a", Locale.getDefault())
+                    replyText = "الساعة الآن: ${sdf.format(Date())}"
+                }
+            }
+            addLog("نُفّذ: $clean")
             return
         }
 
-        when (match.type) {
-            "APP" -> {
-                val launch = context.packageManager.getLaunchIntentForPackage(match.target)
-                if (launch != null) {
-                    launch.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                    context.startActivity(launch)
-                    replyText = "تم تنفيذ الأمر الصوتي: فتح ${match.target}"
-                } else {
-                    replyText = "التطبيق المستهدف غير مثبت على الهاتف (${match.target})."
-                    addLog("تعذر فتح التطبيق: ${match.target}")
-                }
-            }
-            "SETTING" -> {
-                try {
-                    val intent = Intent(match.target).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
-                    context.startActivity(intent)
-                    replyText = "تم تنفيذ الأمر الصوتي: فتح إعدادات النظام."
-                } catch (_: Exception) {
-                    replyText = "تعذر فتح شاشة الإعدادات المطلوبة."
-                    addLog("فشل فتح الإعداد: ${match.target}")
-                }
-            }
-            "TIME" -> {
-                val now = SimpleDateFormat("HH:mm", Locale.getDefault()).format(Date())
-                replyText = "الساعة الآن: $now"
+        val settingMatch = matchSystemSettingAction(normClean)
+        if (settingMatch != null) {
+            try {
+                val intent = Intent(settingMatch.first).apply { addFlags(Intent.FLAG_ACTIVITY_NEW_TASK) }
+                context.startActivity(intent)
+                replyText = "تم تنفيذ الأمر: فتح ${settingMatch.second}."
+                addLog("نُفّذ: $clean")
+                return
+            } catch (_: Exception) {
+                replyText = "تعذر فتح ${settingMatch.second}."
+                addLog("فشل فتح الإعداد: ${settingMatch.first}")
+                return
             }
         }
+
+        val appMatch = findInstalledAppIntent(clean)
+        if (appMatch != null) {
+            try {
+                context.startActivity(appMatch.first)
+                replyText = "تم تنفيذ الأمر: فتح ${appMatch.second}"
+                addLog("نُفّذ: $clean")
+                return
+            } catch (_: Exception) {
+                replyText = "تعذر تشغيل التطبيق: ${appMatch.second}"
+                addLog("فشل فتح التطبيق: ${appMatch.second}")
+                return
+            }
+        }
+
+        replyText = "لم أتعرف على الأمر: «$clean». يمكنك إضافته من صفحة الإصلاحات والتعليم."
+        addLog("أمر غير معروف: $clean")
     }
 
     val voiceLauncher = rememberLauncherForActivityResult(
