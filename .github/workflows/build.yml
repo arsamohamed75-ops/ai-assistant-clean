@@ -16,6 +16,16 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
       - name: Assemble Debug APK
         run: gradle assembleDebug --no-daemon
+      - name: Sign Debug APK
+        run: |
+          APK_IN="app/build/outputs/apk/debug/app-debug.apk"
+          APK_OUT="app/build/outputs/apk/debug/app-debug-signed.apk"
+          KEYSTORE="$RUNNER_TEMP/debug-sign.jks"
+          keytool -genkeypair -v -keystore "$KEYSTORE" -storepass android -keypass android -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -dname "CN=Android Debug,O=Android,C=US"
+          BUILD_TOOLS_DIR=$(ls -d "$ANDROID_HOME/build-tools/"* | sort -V | tail -n 1)
+          "$BUILD_TOOLS_DIR/apksigner" sign --ks "$KEYSTORE" --ks-pass pass:android --key-pass pass:android --out "$APK_OUT" "$APK_IN"
+          "$BUILD_TOOLS_DIR/apksigner" verify --verbose "$APK_OUT"
+          mv "$APK_OUT" "$APK_IN"
       - uses: actions/upload-artifact@v4
         with:
           name: clean-assistant-apk
