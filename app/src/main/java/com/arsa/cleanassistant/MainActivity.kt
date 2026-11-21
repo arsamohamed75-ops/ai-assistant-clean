@@ -91,7 +91,7 @@ fun AssistantApp() {
 
     fun normalizeArabic(text: String): String = text
         .lowercase()
-        .replace(Regex("[\u064B-\u065F\u0670]"), "")
+        .replace(Regex("[ًٌٍَُِْـٰ]"), "")
         .replace("أ", "ا").replace("إ", "ا").replace("آ", "ا")
         .replace("ة", "ه").replace("ى", "ي")
         .replace(Regex("[^\p{L}\p{N}\s]"), " ")
