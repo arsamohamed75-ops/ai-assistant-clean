@@ -4,6 +4,7 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.app.Activity
 import android.os.Bundle
 import android.provider.Settings
 import android.speech.RecognizerIntent
@@ -141,7 +142,7 @@ fun AssistantApp() {
     val voiceLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
-        if (result.resultCode == ComponentActivity.RESULT_OK) {
+        if (result.resultCode == Activity.RESULT_OK) {
             val spoken = result.data
                 ?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)
                 ?.firstOrNull()
